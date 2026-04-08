@@ -210,3 +210,4 @@ __marimo__/
 galaxy_catalog.json
 workflow_catalog.json
 galaxy_skills/
+\n# Demo data\ndemo_data/
