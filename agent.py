@@ -219,6 +219,24 @@ TOOLS = [
             "required": ["history_id"]
         }
     },
+    {
+        "name": "download_job_outputs",
+        "description": "Download completed outputs from a Galaxy history to local output directory. Only call this when the user asks to download results or when a job is confirmed complete.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "history_id": {
+                    "type": "string",
+                    "description": "The Galaxy history ID to download outputs from"
+                },
+                "run_dir": {
+                    "type": "string",
+                    "description": "Local output directory path from job_info.json"
+                }
+            },
+            "required": ["history_id", "run_dir"]
+        }
+    },    
 ]
 
 # ---------------------------------------------------------------------------
@@ -482,6 +500,63 @@ def _write_repro_bundle(run_dir: Path, tool_id: str, input_file: Path, outputs: 
         "\n".join(lines) + "\n", encoding="utf-8"
     )
 
+def download_job_outputs(history_id: str, run_dir: str) -> str:
+    """Download completed datasets from a Galaxy history."""
+    try:
+        output_path = Path(run_dir) / "outputs"
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        datasets = gi.histories.show_history(history_id, contents=True)
+        downloaded = []
+        skipped = []
+
+        for ds in datasets:
+            if ds.get("history_content_type") != "dataset":
+                continue
+            state = ds.get("state")
+            if state != "ok":
+                skipped.append({
+                    "name": ds.get("name"),
+                    "state": state
+                })
+                continue
+
+            ext = ds.get("extension", "dat")
+            fname = f"{ds.get('name', ds['id'])}.{ext}"
+            out_path = output_path / fname
+            gi.datasets.download_dataset(
+                ds["id"],
+                file_path=str(out_path),
+                use_default_filename=False
+            )
+            downloaded.append(fname)
+            print(f"  Downloaded: {fname}")
+
+        # Update job_info.json status
+        job_info_path = Path(run_dir) / "job_info.json"
+        if job_info_path.exists():
+            job_info = json.loads(job_info_path.read_text())
+            job_info["status"] = "complete"
+            job_info["downloaded_at"] = datetime.now(timezone.utc).isoformat()
+            job_info["outputs"] = downloaded
+            job_info_path.write_text(json.dumps(job_info, indent=2))
+
+        # Write reproducibility bundle now that we have outputs
+        input_file = Path(
+            json.loads((Path(run_dir) / "job_info.json").read_text())
+            .get("input_file", "")
+        )
+        _write_repro_bundle(Path(run_dir), history_id, input_file, downloaded)
+
+        return json.dumps({
+            "status": "success",
+            "downloaded": downloaded,
+            "skipped": skipped,
+            "output_dir": str(output_path)
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
 
 # ---------------------------------------------------------------------------
 # Tool executor
@@ -509,6 +584,11 @@ def execute_tool(tool_name: str, tool_input: dict, context: dict) -> str:
         return list_active_jobs(tool_input.get("limit", 10))
     elif tool_name == "get_job_details":
         return get_job_details(tool_input["history_id"])
+    elif tool_name == "download_job_outputs":
+        return download_job_outputs(
+            tool_input["history_id"],
+            tool_input["run_dir"]
+        )
     return f"Unknown tool: {tool_name}"
 
 
@@ -542,6 +622,8 @@ def build_system_prompt(context: dict) -> str:
 - Never fetch full job details for all jobs unless the user specifically asks
 - Be concise and direct
 - When you return tool results, summarize them clearly for a lab member
+- Never auto-download outputs — only call download_job_outputs when the user explicitly asks
+- When a user asks to download, first check job status with get_job_details to confirm it's complete
 """.strip()
 
 
