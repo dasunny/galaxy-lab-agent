@@ -44,8 +44,13 @@ gi = GalaxyInstance(
     verify=False
 )
 gi.verify = False  # Disable SSL verification for self-signed certs
-gi.session.verify = False
-
+import requests
+from requests.adapters import HTTPAdapter
+original_send = requests.Session.send
+def patched_send(self, *args, **kwargs):
+    kwargs['verify'] = False
+    return original_send(self, *args, **kwargs)
+requests.Session.send = patched_send
 # ---------------------------------------------------------------------------
 # Startup sync — runs once when agent starts
 # ---------------------------------------------------------------------------
