@@ -163,6 +163,28 @@ TOOLS = [
             "required": ["history_id"]
         }
     },
+    {
+        "name": "run_single_tool",
+        "description": "Run a single Galaxy tool on an input file. Always confirm with the user before calling this. Use for testing or simple single-step analyses.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tool_id": {
+                    "type": "string",
+                    "description": "The full Galaxy tool ID"
+                },
+                "input_path": {
+                    "type": "string",
+                    "description": "Local path to the input file"
+                },
+                "history_name": {
+                    "type": "string",
+                    "description": "Name for the new Galaxy history"
+                }
+            },
+            "required": ["tool_id", "input_path", "history_name"]
+        }
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -247,7 +269,136 @@ def execute_tool(tool_name: str, tool_input: dict, context: dict) -> str:
         return list_histories(tool_input.get("limit", 10))
     elif tool_name == "get_history_details":
         return get_history_details(tool_input["history_id"])
+    elif tool_name == "run_single_tool":
+        return run_single_tool(
+            tool_input["tool_id"],
+            tool_input["input_path"],
+            tool_input["history_name"]
+        )
     return f"Unknown tool: {tool_name}"
+
+def run_single_tool(tool_id: str, input_path: str, history_name: str) -> str:
+    """Upload a file, run a single Galaxy tool, poll for completion, download results."""
+    import hashlib
+    from datetime import datetime, timezone
+
+    input_file = Path(input_path)
+    if not input_file.exists():
+        return f"Error: input file not found at {input_path}"
+
+    # Create output directory
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_dir = OUTPUT_DIR / f"{tool_id.split('/')[-2] if '/' in tool_id else tool_id}_{ts}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # 1. Create history
+        print(f"  Creating history: {history_name}")
+        history = gi.histories.create_history(name=history_name)
+        history_id = history["id"]
+
+        # 2. Upload input
+        print(f"  Uploading {input_file.name}...")
+        upload = gi.tools.upload_file(str(input_file), history_id)
+        dataset_id = upload["outputs"][0]["id"]
+
+        # 3. Poll until upload ready
+        print("  Waiting for upload...")
+        _poll_dataset(history_id, dataset_id)
+
+        # 4. Run tool
+        print(f"  Running {tool_id}...")
+        inputs = {"input_file": {"src": "hda", "id": dataset_id}}
+        result = gi.tools.run_tool(history_id, tool_id, inputs)
+        output_ids = [o["id"] for o in result.get("outputs", [])]
+
+        # 5. Poll until outputs ready
+        print("  Waiting for job to complete...")
+        for oid in output_ids:
+            _poll_dataset(history_id, oid)
+
+        # 6. Download outputs
+        downloads_dir = run_dir / "outputs"
+        downloads_dir.mkdir(exist_ok=True)
+        downloaded = []
+
+        for oid in output_ids:
+            ds = gi.datasets.show_dataset(oid)
+            ext = ds.get("extension", "dat")
+            fname = f"{ds.get('name', oid)}.{ext}"
+            out_path = downloads_dir / fname
+            gi.datasets.download_dataset(
+                oid,
+                file_path=str(out_path),
+                use_default_filename=False
+            )
+            downloaded.append(fname)
+            print(f"  Downloaded: {fname}")
+
+        # 7. Write reproducibility bundle
+        _write_repro_bundle(run_dir, tool_id, input_file, downloaded)
+
+        return json.dumps({
+            "status": "success",
+            "tool_id": tool_id,
+            "history": history_name,
+            "history_id": history_id,
+            "outputs": downloaded,
+            "output_dir": str(run_dir),
+        }, indent=2)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+def _poll_dataset(history_id: str, dataset_id: str, timeout: int = 600):
+    """Poll until a dataset is in 'ok' state."""
+    import time
+    start = time.time()
+    while time.time() - start < timeout:
+        ds = gi.datasets.show_dataset(dataset_id)
+        state = ds.get("state", "")
+        if state == "ok":
+            return
+        if state in ("error", "discarded", "failed_metadata"):
+            raise RuntimeError(f"Dataset {dataset_id} failed with state: {state}")
+        time.sleep(3)
+    raise TimeoutError(f"Dataset {dataset_id} timed out after {timeout}s")
+
+
+def _write_repro_bundle(run_dir: Path, tool_id: str, input_file: Path, outputs: list):
+    """Write reproducibility bundle for a tool run."""
+    import hashlib
+    from datetime import datetime, timezone
+
+    repro = run_dir / "reproducibility"
+    repro.mkdir(exist_ok=True)
+    ts = datetime.now(timezone.utc).isoformat()
+
+    (repro / "commands.sh").write_text(
+        f"#!/usr/bin/env bash\n"
+        f"# Tool: {tool_id}\n"
+        f"# Date: {ts}\n"
+        f"# Galaxy: {gi.base_url}\n\n"
+        f"python agent.py\n"
+        f"# Then ask: run {tool_id} on {input_file.name}\n",
+        encoding="utf-8"
+    )
+
+    (repro / "environment.yml").write_text(
+        f"galaxy_url: {gi.base_url}\n"
+        f"tool_id: {tool_id}\n"
+        f"date: {ts}\n",
+        encoding="utf-8"
+    )
+
+    lines = []
+    for fp in [input_file] + [run_dir / "outputs" / o for o in outputs]:
+        p = Path(fp)
+        if p.exists():
+            sha = hashlib.sha256(p.read_bytes()).hexdigest()
+            lines.append(f"{sha}  {p.name}")
+    (repro / "checksums.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")    
 
 # ---------------------------------------------------------------------------
 # System prompt builder
@@ -274,6 +425,8 @@ def build_system_prompt(context: dict) -> str:
 - For workflow questions, use list_workflows or get_workflow_details
 - For history and job status, use list_histories or get_history_details
 - Be concise and direct
+- Before calling run_single_tool, always confirm with the user and summarize the action clearly
+- For run_single_tool, find the correct full tool ID from the catalog first using search_tools
 - When you return tool results, summarize them clearly for a lab member
 """.strip()
 
@@ -281,12 +434,12 @@ def build_system_prompt(context: dict) -> str:
 # Agent loop
 # ---------------------------------------------------------------------------
 
-def run_agent(user_message: str, context: dict):
-    """Single turn of the agent loop."""
+def run_agent(user_message: str, context: dict, history: list) -> list:
+    """Single turn of the agent loop. Takes and returns conversation history."""
     print(f"\nUser: {user_message}")
     print("-" * 40)
 
-    messages = [{"role": "user", "content": user_message}]
+    history.append({"role": "user", "content": user_message})
     system_prompt = build_system_prompt(context)
 
     while True:
@@ -295,11 +448,11 @@ def run_agent(user_message: str, context: dict):
             max_tokens=1024,
             system=system_prompt,
             tools=TOOLS,
-            messages=messages
+            messages=history
         )
 
         if response.stop_reason == "tool_use":
-            messages.append({"role": "assistant", "content": response.content})
+            history.append({"role": "assistant", "content": response.content})
 
             tool_results = []
             for block in response.content:
@@ -312,13 +465,20 @@ def run_agent(user_message: str, context: dict):
                         "content": result
                     })
 
-            messages.append({"role": "user", "content": tool_results})
+            history.append({"role": "user", "content": tool_results})
 
         elif response.stop_reason == "end_turn":
             for block in response.content:
                 if hasattr(block, "text"):
                     print(f"\nAssistant: {block.text}")
+                    history.append({
+                        "role": "assistant",
+                        "content": block.text
+                    })
             break
+
+    return history
+
 
 # ---------------------------------------------------------------------------
 # Main
@@ -326,6 +486,7 @@ def run_agent(user_message: str, context: dict):
 
 if __name__ == "__main__":
     context = startup_sync()
+    conversation_history = []  # persists across turns
 
     print("ODU Genomics Lab Agent — type 'quit' to exit")
     print("=" * 40)
@@ -342,4 +503,4 @@ if __name__ == "__main__":
         if not user_input:
             continue
 
-        run_agent(user_input, context)
+        conversation_history = run_agent(user_input, context, conversation_history)
