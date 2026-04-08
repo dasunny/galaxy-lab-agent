@@ -40,3 +40,30 @@ genomics, epigenomics, transcriptomics, or otherwise.
 - Never guess tool IDs — always use the catalog
 - Always generate a reproducibility bundle for executions
 - Prefer local catalog lookups over live API calls where possible
+
+## Roadmap (Future Capabilities)
+
+### v0.1 — Discovery + Monitoring (current)
+- Natural language tool and workflow discovery from local catalog
+- Check job status and histories
+- Answer methodology questions without hitting the API
+
+### v0.2 — Workflow Execution
+- Invoke existing Galaxy workflows via BioBlend
+- Poll for completion and report status
+- Generate reproducibility bundles for every run
+
+### v0.3 — Individual Tool Invocation
+- Run single Galaxy tools on demand
+- Handle tool-specific parameter schemas
+- Chain tool outputs into histories
+
+### v0.4 — Workflow Assembly from Templates
+- Suggest multi-tool pipelines for a described task
+- Assemble and import new .ga workflow files
+- Build from curated templates per analysis type
+
+### v1.0 — Dynamic Workflow Construction
+- Agent reasons about biological question
+- Designs pipeline from scratch
+- Constructs, imports, and executes novel workflows
