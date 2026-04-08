@@ -43,6 +43,8 @@ gi = GalaxyInstance(
     key=os.environ.get("GALAXY_API_KEY"),
     verify=False
 )
+gi.verify = False  # Disable SSL verification for self-signed certs
+gi.session.verify = False
 
 # ---------------------------------------------------------------------------
 # Startup sync — runs once when agent starts
