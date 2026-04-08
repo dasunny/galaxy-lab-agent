@@ -1,0 +1,58 @@
+{
+  "3dc0f20bd1c9062a": {
+    "name": "Edited Copy of ATACseq (release v0.14) (imported from uploaded file) shared by user javon",
+    "id": "3dc0f20bd1c9062a",
+    "steps": 30,
+    "owner": "dfrom001",
+    "inputs": {
+      "0": {
+        "label": "PE fastq input",
+        "value": "",
+        "uuid": "e92cc2ed-d104-45ea-ac4c-06ce5d181937"
+      },
+      "1": {
+        "label": "reference_genome",
+        "value": "",
+        "uuid": "53bddadf-a9ed-4ac8-812e-dc025e7650d5"
+      },
+      "2": {
+        "label": "effective_genome_size",
+        "value": "",
+        "uuid": "d95235f2-36be-433b-8adb-d2fd72ba46a1"
+      },
+      "3": {
+        "label": "bin_size",
+        "value": "",
+        "uuid": "98026025-51fc-4619-a008-d20562fb3618"
+      }
+    }
+  },
+  "2c0ddcd2a26a69c9": {
+    "name": "Copy of ATACseq (release v0.14) (imported from uploaded file) shared by user javon",
+    "id": "2c0ddcd2a26a69c9",
+    "steps": 30,
+    "owner": "dfrom001",
+    "inputs": {
+      "0": {
+        "label": "PE fastq input",
+        "value": "",
+        "uuid": "e92cc2ed-d104-45ea-ac4c-06ce5d181937"
+      },
+      "1": {
+        "label": "reference_genome",
+        "value": "",
+        "uuid": "53bddadf-a9ed-4ac8-812e-dc025e7650d5"
+      },
+      "2": {
+        "label": "effective_genome_size",
+        "value": "",
+        "uuid": "d95235f2-36be-433b-8adb-d2fd72ba46a1"
+      },
+      "3": {
+        "label": "bin_size",
+        "value": "",
+        "uuid": "98026025-51fc-4619-a008-d20562fb3618"
+      }
+    }
+  }
+}

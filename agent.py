@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 import anthropic
 import urllib3
 from bioblend.galaxy import GalaxyInstance
+from sync import run_full_sync
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -46,28 +47,6 @@ gi = GalaxyInstance(
 # ---------------------------------------------------------------------------
 # Startup sync — runs once when agent starts
 # ---------------------------------------------------------------------------
-
-def sync_workflow_catalog() -> dict:
-    """Fetch current workflows from Galaxy and save to workflow_catalog.json."""
-    print("  Syncing workflows...")
-    workflows = gi.workflows.get_workflows()
-    catalog = {}
-
-    for wf in workflows:
-        details = gi.workflows.show_workflow(wf["id"])
-        catalog[wf["id"]] = {
-            "name": details["name"],
-            "id": details["id"],
-            "steps": len(details["steps"]),
-            "owner": details.get("owner", ""),
-            "inputs": details.get("inputs", {}),
-        }
-
-    WORKFLOW_CATALOG_PATH.write_text(
-        json.dumps(catalog, indent=2), encoding="utf-8"
-    )
-    return catalog
-
 
 def load_context() -> dict:
     """Load all local catalogs into memory for injection into system prompt."""
@@ -103,8 +82,11 @@ def load_context() -> dict:
 def startup_sync() -> dict:
     """Run on agent start — sync Galaxy state, return loaded context."""
     print("Syncing with Galaxy server...")
-    sync_workflow_catalog()
+    sync_data = run_full_sync(gi)
+
     context = load_context()
+    context.update(sync_data)
+
     print(f"  Tools available: {context['tool_count']}")
     print(f"  Workflows loaded: {len(context['workflows'])}")
     print("Ready.\n")
