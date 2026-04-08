@@ -100,7 +100,7 @@ def startup_sync() -> dict:
 TOOLS = [
     {
         "name": "search_tools",
-        "description": "Search the local Galaxy tool catalog by keyword. Use this for any question about what tools are available. Does not hit the Galaxy API.",
+        "description": "Search the local Galaxy tool catalog by keyword. Use this ONCE per user request with the most relevant search term. Do not call multiple times for the same request. Does not hit the Galaxy API.",
         "input_schema": {
             "type": "object",
             "properties": {
